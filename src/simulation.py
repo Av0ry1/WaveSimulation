@@ -2,10 +2,9 @@ import pygame
 import numpy as np
 
 from numba import njit, prange
-from time import time
 
 @njit()
-def updateWaves(waveHeight, waveVelocity, waveWeight, Width, Height):
+def update_waves(waveHeight, waveVelocity, waveWeight, Width, Height):
     for x in prange(1, Width-1):
         for y in prange(1, Height-1):
             for k in prange(3):
@@ -13,7 +12,7 @@ def updateWaves(waveHeight, waveVelocity, waveWeight, Width, Height):
     return waveVelocity
 
 @njit()
-def updateDW(waveHeight, frame, cx, cy, size, freq, time):
+def update_dw(waveHeight, frame, cx, cy, size, freq):
     for x in prange(cx-size**2, cx+size**2):
         for y in prange(cy-size**2, cy+size**2):
             r = (x - cx)**2 + (y - cy)**2
@@ -28,6 +27,7 @@ class Simulation:
         self.screen = pygame.display.set_mode(screenSize, pygame.WINDOWMAXIMIZED)
         self.surface = pygame.Surface(sceneSize)
         self.weightOverlay = pygame.Surface(sceneSize)
+        self.weightOverlay = pygame.transform.scale(self.weightOverlay, self.screenSize)
         self.weightOverlay.set_alpha(10)
         self.clock = pygame.time.Clock()
 
@@ -41,10 +41,11 @@ class Simulation:
         self.waveVelocity = np.zeros((self.Width, self.Height, 3), np.float32)
         self.waveWeight = np.ones((self.Width, self.Height, 3), np.float32)
 
-        self.frame = 0
         self.borderRadius  = 150
         self.borderCoef = 1 + 0.05*self.borderRadius/200
         self.absRenderWaves = False
+
+        self.frame = 0
 
     def update(self):
         #WAVE SOURCES:
@@ -52,7 +53,7 @@ class Simulation:
             source.update(self.waveHeight, self.frame)
 
         #ALL WAVES:
-        self.waveHeight += updateWaves(self.waveHeight, self.waveVelocity, self.waveWeight, self.Width, self.Height)
+        self.waveHeight += update_waves(self.waveHeight, self.waveVelocity, self.waveWeight, self.Width, self.Height)
 
         #BORDER:
         self.waveHeight[0:self.Width, 0:self.borderRadius] /= self.borderCoef
@@ -63,12 +64,14 @@ class Simulation:
     def setWeight(self, weightMap):
         self.waveWeight = weightMap
         pygame.surfarray.blit_array(self.weightOverlay, np.clip((self.waveWeight-1)*100000, 0, 255))
+        self.weightOverlay = pygame.transform.scale(self.weightOverlay, self.screenSize)
 
     def render(self):
         if self.absRenderWaves:
             pygame.surfarray.blit_array(self.surface, np.clip(np.abs(self.waveHeight)*255, 0, 255))
         else:
             pygame.surfarray.blit_array(self.surface, np.clip(self.waveHeight*255, 0, 255))
+
         self.screen.blit(pygame.transform.scale(self.surface, self.screenSize), (0, 0))
         self.screen.blit(self.weightOverlay, (0, 0))
         pygame.display.flip()
@@ -104,4 +107,18 @@ class directedSource(waveSource):
         self.size = size
 
     def update(self, waveHeight, frame):
-        return updateDW(waveHeight, frame, self.x, self.y, self.size, self.freq, time())
+        return update_dw(waveHeight, frame, self.x, self.y, self.size, self.freq)
+
+class rectSource:
+    def __init__(self, start_position : list | tuple, end_position : list | tuple,frequency : float, amplitude : float):
+        self.pos = [start_position, end_position]
+        self.x1 = self.pos[0][0]
+        self.x2 = self.pos[1][0]
+        self.y1 = self.pos[0][1]
+        self.y2 = self.pos[1][1]
+        self.freq = frequency
+        self.amp = amplitude
+
+    def update(self, waveHeight, frame):
+        waveHeight[self.x1:self.x2, self.y1:self.y2, 0:3] = np.sin(frame*self.freq) * self.amp
+        return waveHeight

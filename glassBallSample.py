@@ -3,7 +3,7 @@ import numpy as np
 from src.simulation import Simulation, directedSource
 
 sim = Simulation((1600, 900), (1600, 900))
-sim.waveSources.append(directedSource((400, 300), 1, 1, 10))
+sim.waveSources.append(directedSource((400, 300), 1, 1, 20))
 
 weightMap = np.ones((sim.Width, sim.Height, 3), np.float32)
 
