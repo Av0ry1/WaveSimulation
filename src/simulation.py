@@ -21,6 +21,15 @@ def update_dw(waveHeight, frame, cx, cy, size, freq):
 
     return waveHeight
 
+@njit()
+def border(waveHeight, waveVelocity, Width, Height, borderRadius):
+    for x in prange(1, Width-1):
+        for y in prange(1, Height-1):
+            if x < borderRadius or Width-x < borderRadius or y < borderRadius or Height-y < borderRadius:
+                for k in prange(3):
+                    if waveVelocity[x][y][k] < 0 and waveHeight[x][y][k] < 0 or waveVelocity[x][y][k] > 0 and waveVelocity[x][y][k] > 0:
+                        waveHeight[x][y][k] -= waveHeight[x][y][k]/min(x, Width-x, y, Height-y)**1.2
+
 class Simulation:
     def __init__(self, screenSize : list | tuple, sceneSize : list | tuple):
         self.screenSize = screenSize
@@ -32,20 +41,31 @@ class Simulation:
         self.clock = pygame.time.Clock()
 
         self.sceneSize = sceneSize
-        self.Width = self.sceneSize[0]
-        self.Height = self.sceneSize[1]
+        self.Width = sceneSize[0]
+        self.Height = sceneSize[1]
 
         self.waveSources = []
 
         self.waveHeight = np.zeros((self.Width, self.Height, 3), np.float32)
         self.waveVelocity = np.zeros((self.Width, self.Height, 3), np.float32)
         self.waveWeight = np.ones((self.Width, self.Height, 3), np.float32)
+        self.accumulatedLight = np.zeros((self.Width, self.Height, 3), np.float32)
 
-        self.borderRadius  = 150
-        self.borderCoef = 1 + 0.05*self.borderRadius/200
-        self.absRenderWaves = False
+        self.borderRadius  = 100
+        self.accumulate = False
 
         self.frame = 0
+
+    def setWeight(self, weightMap):
+        self.waveWeight = weightMap
+
+        for x in range(1, self.Width-1):
+            for y in range(1, self.Height-1):
+                for k in range(3):
+                    self.waveWeight[x][y][k] = self.waveWeight[x][y][k] + (k*0.065 if self.waveWeight[x][y][k] != 1 else 0)
+
+        pygame.surfarray.blit_array(self.weightOverlay, np.clip((self.waveWeight-1)*100000, 0, 255))
+        self.weightOverlay = pygame.transform.scale(self.weightOverlay, self.screenSize)
 
     def update(self):
         #WAVE SOURCES:
@@ -56,25 +76,20 @@ class Simulation:
         self.waveHeight += update_waves(self.waveHeight, self.waveVelocity, self.waveWeight, self.Width, self.Height)
 
         #BORDER:
-        self.waveHeight[0:self.Width, 0:self.borderRadius] /= self.borderCoef
-        self.waveHeight[0:self.Width, self.Height-self.borderRadius:self.Height] /= self.borderCoef
-        self.waveHeight[0:self.borderRadius, 0:self.Height] /= self.borderCoef
-        self.waveHeight[self.Width-self.borderRadius:self.Width, 0:self.Height] /= self.borderCoef
-
-    def setWeight(self, weightMap):
-        self.waveWeight = weightMap
-        pygame.surfarray.blit_array(self.weightOverlay, np.clip((self.waveWeight-1)*100000, 0, 255))
-        self.weightOverlay = pygame.transform.scale(self.weightOverlay, self.screenSize)
+        border(self.waveHeight, self.waveVelocity, self.Width, self.Height, self.borderRadius)
 
     def render(self):
-        if self.absRenderWaves:
-            pygame.surfarray.blit_array(self.surface, np.clip(np.abs(self.waveHeight)*255, 0, 255))
+        if self.accumulate:
+            self.accumulatedLight = (self.accumulatedLight * 299 + np.abs(self.waveHeight)) / 300
+
+            pygame.surfarray.blit_array(self.surface, np.clip(self.accumulatedLight*255, 0, 255))
         else:
             pygame.surfarray.blit_array(self.surface, np.clip(self.waveHeight*255, 0, 255))
 
         self.screen.blit(pygame.transform.scale(self.surface, self.screenSize), (0, 0))
         self.screen.blit(self.weightOverlay, (0, 0))
         pygame.display.flip()
+        #print(int(self.clock.get_fps()))
 
     def run(self):
         self.running = True
@@ -86,7 +101,6 @@ class Simulation:
             self.update()
             self.render()
             self.frame += 1
-            print(int(self.clock.get_fps()))
 
 class waveSource:
     def __init__(self, position : list | tuple, frequency : float, amplitude : float):
